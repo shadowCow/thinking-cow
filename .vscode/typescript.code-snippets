@@ -1,0 +1,29 @@
+{
+  "ADT Variant": {
+    "prefix": ["adt_variant"],
+    "body": [
+      "export const ${1/(.*)/${1:/camelcase}/} = adt<'${1}', void>('${1}');",
+      "export type ${1:Kind} = ReturnType<typeof ${1/(.*)/${1:/camelcase}/}>;",
+      "$0"
+    ],
+    "description": "A variant of an Algebraic Data Type"
+  },
+  "Generic ADT Variant": {
+    "prefix": ["generic_adt_variant"],
+    "body": [
+      "export const ${1}Kind: '${1}' = '${1}'",
+      "export type ${1:Kind}<T> = {",
+      "\tkind: typeof ${1}Kind",
+      "\tvalue: {",
+      "\t\t$0",
+      "\t}",
+      "}",
+      "export function ${1/(.*)/${1:/camelcase}/}<T>(value: ${1}<T>['value']): ${1}<T> {",
+      "\treturn {",
+      "\t\tkind: '${1}',",
+      "\t\tvalue,",
+      "\t}",
+      "}"
+    ]
+  }
+}
