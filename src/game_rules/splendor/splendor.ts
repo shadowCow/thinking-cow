@@ -1,32 +1,15 @@
 import { adt, assertNever } from '@/utils/adt';
 
 export type SplendorState = {
-  tier1: CardTier;
-  tier2: CardTier;
-  tier3: CardTier;
+  board: Board;
+  cardStacks: Array<Array<Card>>;
   gems: GemCounts;
   unclaimedLocationTiles: Array<LocationTile>;
   players: Array<PlayerState>;
+  playerTurn: number;
 };
 
-export type CardTier = TierWithStack | TierWithoutStack;
-
-export type TierWithStack = {
-  kind: 'TierWithStack';
-  stack: Array<Card>;
-  slot1: Card;
-  slot2: Card;
-  slot3: Card;
-  slot4: Card;
-};
-
-export type TierWithoutStack = {
-  kind: 'TierWithoutStack';
-  slot1: Card | undefined;
-  slot2: Card | undefined;
-  slot3: Card | undefined;
-  slot4: Card | undefined;
-};
+export type Board = Array<Array<Card | undefined>>;
 
 export type Card = {
   name: string;
@@ -64,11 +47,13 @@ export type WildGemCount = {
 
 export type PlayerState = {
   cards: Array<Card>;
-  reservedCards: Array<Card>;
+  reservedCards: ReserveSlots;
   gems: GemCounts;
   locationTiles: Array<LocationTile>;
   hasAvengerTile: boolean;
 };
+
+export type ReserveSlots = Array<Card | undefined>;
 
 export type LocationTile =
   | TriskelionTile
@@ -116,6 +101,11 @@ export type AvengersTowerNyc = ReturnType<typeof avengersTowerNyc>;
 export const attilan = adt<'Attilan', { purple: 4; red: 4 }>('Attilan');
 export type Attilan = ReturnType<typeof attilan>;
 
+export type SplendorMove = {
+  playerIndex: number;
+  action: SplendorAction;
+};
+
 export type SplendorAction =
   | TakeDifferentTokens
   | TakeSameTokens
@@ -144,28 +134,131 @@ export const reserveCard = adt<
 >('ReserveCard');
 export type ReserveCard = ReturnType<typeof reserveCard>;
 
-export const buyReservedCard = adt<'BuyReservedCard', { card: Card }>(
+export const buyReservedCard = adt<
   'BuyReservedCard',
-);
+  { reserveSlot: 1 | 2 | 3 }
+>('BuyReservedCard');
 export type BuyReservedCard = ReturnType<typeof buyReservedCard>;
 
-export const recruitCard = adt<'RecruitCard', { card: Card }>('RecruitCard');
+export const recruitCard = adt<'RecruitCard', { card: CardBoardLocation }>(
+  'RecruitCard',
+);
 export type RecruitCard = ReturnType<typeof recruitCard>;
+
+export type CardBoardLocation = {
+  tier: 1 | 2 | 3;
+  slot: 1 | 2 | 3 | 4;
+};
 
 export function transition(
   state: SplendorState,
-  action: SplendorAction,
+  move: SplendorMove,
 ): SplendorState {
-  switch (action.kind) {
-    case takeDifferentTokens.kind:
-    case takeSameTokens.kind:
-    case reserveCard.kind:
-    case buyReservedCard.kind:
-    case recruitCard.kind:
+  if (isPlayerTurn(state, move)) {
+    switch (move.action.kind) {
+      case takeDifferentTokens.kind:
+      case takeSameTokens.kind:
+      case reserveCard.kind:
+        return state;
+      case buyReservedCard.kind:
+        return doBuyReservedCard(state, move.action.value.reserveSlot);
+      case recruitCard.kind:
+        const card = getCardAtBoardLocation(state, move.action.value.card);
+        if (
+          card !== undefined &&
+          canRecruitCard(state.players[state.playerTurn], card)
+        ) {
+          return doRecruitCard(state, move.action.value.card);
+        }
 
-    default:
-      assertNever(action);
+        return state;
+      default:
+        assertNever(move.action);
+    }
+  } else {
+    return state;
   }
+}
+
+function doBuyReservedCard(state: SplendorState, slot: number): SplendorState {
+  const player = state.players[state.playerTurn];
+  const card = player.reservedCards[slot];
+
+  if (card !== undefined) {
+    const nextPlayerState: PlayerState = {
+      ...player,
+      cards: player.cards.concat(card),
+      reservedCards: player.reservedCards.filter((card, index) => {
+        return index !== slot;
+      }),
+    };
+
+    return {
+      ...state,
+      players: state.players.map((player, index) => {
+        if (index === state.playerTurn) {
+          return nextPlayerState;
+        } else {
+          return player;
+        }
+      }),
+    };
+  }
+
+  return state;
+}
+
+function doRecruitCard(
+  state: SplendorState,
+  location: CardBoardLocation,
+): SplendorState {
+  const card = state.board[location.tier][location.slot];
+
+  if (card !== undefined) {
+    const nextBoard = [...state.board];
+    const [replacementCard, ...nextStack] = state.cardStacks[location.tier];
+    nextBoard[location.tier][location.slot] = replacementCard;
+
+    const nextPlayerState = {
+      ...state.players[state.playerTurn],
+    };
+    nextPlayerState.cards = state.players[state.playerTurn].cards.concat(card);
+
+    return {
+      ...state,
+      cardStacks: state.cardStacks.map((stack, tier) => {
+        if (tier === location.tier) {
+          return nextStack;
+        } else {
+          return stack;
+        }
+      }),
+      board: nextBoard,
+      players: state.players.map((player, index) => {
+        if (index === state.playerTurn) {
+          return nextPlayerState;
+        } else {
+          return player;
+        }
+      }),
+    };
+  }
+
+  return state;
+}
+
+function getCardAtBoardLocation(
+  state: SplendorState,
+  location: CardBoardLocation,
+): Card | undefined {
+  return state.board[location.tier][location.slot];
+}
+
+export function isPlayerTurn(
+  state: SplendorState,
+  move: SplendorMove,
+): boolean {
+  return state.playerTurn === move.playerIndex;
 }
 
 export function computePlayerScore(player: PlayerState): number {
@@ -187,7 +280,7 @@ export function hasWinCon(player: PlayerState): boolean {
   return score >= 16 && hasTimeStone;
 }
 
-export function canBuyCard(player: PlayerState, card: Card): boolean {
+export function canRecruitCard(player: PlayerState, card: Card): boolean {
   const buyingPowerNoWilds = playerColoredGemCounts(player);
 
   const gemsNeeded = gemsNeededToBuy(card.cost, buyingPowerNoWilds);
